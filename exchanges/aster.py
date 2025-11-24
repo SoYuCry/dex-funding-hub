@@ -23,11 +23,22 @@ class Aster(Exchange):
                              data = item
                              break
                 
+                interval_hours = None
+                if data.get("nextFundingTime") and data.get("time"):
+                    try:
+                        diff = int(data["nextFundingTime"]) - int(data["time"])
+                        if diff > 0:
+                            interval_hours = diff / 3600_000
+                    except Exception:
+                        interval_hours = None
+
                 return {
                     "exchange": self.name,
                     "symbol": symbol,
                     "rate": float(data["lastFundingRate"]),
-                    "timestamp": int(data["time"])
+                    "timestamp": int(data["time"]),
+                    "nextFundingTime": int(data.get("nextFundingTime", 0)) if data.get("nextFundingTime") else None,
+                    "interval_hours": interval_hours
                 }
 
     async def get_all_funding_rates(self) -> list[dict]:
@@ -40,10 +51,21 @@ class Aster(Exchange):
                 
                 results = []
                 for item in data:
+                    interval_hours = None
+                    if item.get("nextFundingTime") and item.get("time"):
+                        try:
+                            diff = int(item["nextFundingTime"]) - int(item["time"])
+                            if diff > 0:
+                                interval_hours = diff / 3600_000
+                        except Exception:
+                            interval_hours = None
+
                     results.append({
                         "exchange": self.name,
                         "symbol": item["symbol"],
                         "rate": float(item["lastFundingRate"]),
-                        "timestamp": int(item["time"])
+                        "timestamp": int(item["time"]),
+                        "nextFundingTime": int(item.get("nextFundingTime", 0)) if item.get("nextFundingTime") else None,
+                        "interval_hours": interval_hours
                     })
                 return results

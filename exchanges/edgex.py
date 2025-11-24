@@ -10,6 +10,7 @@ class EdgeX(Exchange):
     def __init__(self):
         super().__init__("EdgeX", "https://pro.edgex.exchange")
         self.contract_map = {} # Cache for symbol -> contractId
+        self.contract_interval_map = {}
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
@@ -41,10 +42,16 @@ class EdgeX(Exchange):
             for contract in data['data']['contractList']:
                 if contract['contractName'] == symbol:
                     self.contract_map[symbol] = contract['contractId']
+                    interval_min = contract.get("fundingRateIntervalMin")
+                    if interval_min:
+                        self.contract_interval_map[symbol] = float(interval_min) / 60
                     return contract['contractId']
                 # Fallback for USDT -> USD mismatch
                 if symbol.endswith("USDT") and contract['contractName'] == symbol.replace("USDT", "USD"):
                      self.contract_map[symbol] = contract['contractId']
+                     interval_min = contract.get("fundingRateIntervalMin")
+                     if interval_min:
+                         self.contract_interval_map[symbol] = float(interval_min) / 60
                      return contract['contractId']
             
             raise Exception(f"Contract ID not found for symbol: {symbol}")
@@ -96,11 +103,13 @@ class EdgeX(Exchange):
             entry = await self._fetch_latest_funding(contract_id, session)
 
             timestamp = int(entry.get("fundingTimestamp") or entry.get("fundingTime"))
+            interval_hours = self.contract_interval_map.get(symbol)
             return {
                 "exchange": self.name,
                 "symbol": symbol,
                 "rate": float(entry["fundingRate"]),
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "interval_hours": interval_hours
             }
 
     async def _fetch_all_funding_http(self) -> list[dict]:
@@ -121,6 +130,10 @@ class EdgeX(Exchange):
             
             async def fetch_one(contract):
                 try:
+                    interval_hours = None
+                    if contract.get("fundingRateIntervalMin"):
+                        interval_hours = float(contract["fundingRateIntervalMin"]) / 60
+
                     entry = await self._fetch_latest_funding(
                         contract["contractId"],
                         session,
@@ -138,7 +151,8 @@ class EdgeX(Exchange):
                         "exchange": self.name,
                         "symbol": symbol,
                         "rate": float(entry["fundingRate"]),
-                        "timestamp": int(entry.get("fundingTimestamp") or entry.get("fundingTime"))
+                        "timestamp": int(entry.get("fundingTimestamp") or entry.get("fundingTime")),
+                        "interval_hours": interval_hours
                     }
                 except Exception as e:
                     print(f"Error fetching EdgeX rate for {contract['contractName']}: {e}")

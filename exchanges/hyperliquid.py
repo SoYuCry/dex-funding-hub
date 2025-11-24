@@ -48,6 +48,7 @@ class Hyperliquid(Exchange):
                     "symbol": self._coin_to_symbol(coin),
                     "rate": rate,
                     "timestamp": ts,
+                    "interval_hours": 1,
                 }
         raise Exception(f"Symbol {symbol} not found on Hyperliquid")
 
@@ -66,6 +67,7 @@ class Hyperliquid(Exchange):
                     "symbol": self._coin_to_symbol(coin),
                     "rate": rate,
                     "timestamp": now_ms,
+                    "interval_hours": 1,
                 }
             )
         return results

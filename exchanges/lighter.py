@@ -62,7 +62,8 @@ class Lighter(Exchange):
                     "exchange": self.name,
                     "symbol": symbol,
                     "rate": rate_per_hour, # normalized to 1h
-                    "timestamp": int(time.time() * 1000) # Use current time if API doesn't provide it
+                    "timestamp": int(time.time() * 1000), # Use current time if API doesn't provide it
+                    "interval_hours": 1,
                 }
 
     async def get_all_funding_rates(self) -> list[dict]:
@@ -104,6 +105,7 @@ class Lighter(Exchange):
                             "exchange": self.name,
                             "symbol": symbol,
                             "rate": rate_per_hour,
-                            "timestamp": int(time.time() * 1000)
+                            "timestamp": int(time.time() * 1000),
+                            "interval_hours": 1,
                         })
                 return rates
