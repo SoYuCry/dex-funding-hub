@@ -1,0 +1,15 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Virtualenvs
+.env/
+venv/
+.venv/
+
+# OS files
+.DS_Store
+
+# Streamlit cache
+.streamlit/
+
