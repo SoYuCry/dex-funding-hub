@@ -46,21 +46,42 @@ def normalize_symbol(symbol: str) -> str:
     return s
 
 def extract_interval_hours(item: dict, exchange_name: str) -> float:
-    if item.get("interval_hours"):
-        return float(item["interval_hours"])
-    if item.get("fundingInterval"):
+    interval_hours = None
+    if item.get("interval_hours") is not None:
+        interval_hours = float(item["interval_hours"])
+    elif item.get("fundingInterval"):
         try:
-            return float(item["fundingInterval"]) / 3600_000
+            interval_hours = float(item["fundingInterval"]) / 3600_000
         except Exception:
-            pass
-    if item.get("nextFundingTime") and item.get("timestamp"):
+            interval_hours = None
+    elif item.get("nextFundingTime") and item.get("timestamp"):
         try:
             diff = int(item["nextFundingTime"]) - int(item["timestamp"])
             if diff > 0:
-                return diff / 3600_000
+                interval_hours = diff / 3600_000
         except Exception:
-            pass
-    return DEFAULT_INTERVAL_HOURS.get(exchange_name, 8)
+            interval_hours = None
+
+    # Snap to typical buckets by exchange to avoid odd fractions
+    snap_map = {
+        "Aster": [1, 4, 8],
+        "Binance": [1, 4, 8],
+        "EdgeX": [4],
+        "Lighter": [1],
+        "Hyperliquid": [1],
+        "Backpack": [1],
+    }
+    if interval_hours is not None:
+        try:
+            targets = snap_map.get(exchange_name)
+            if targets:
+                interval_hours = min(targets, key=lambda t: abs(t - interval_hours))
+        except Exception:
+            interval_hours = None
+
+    if interval_hours is None:
+        interval_hours = DEFAULT_INTERVAL_HOURS.get(exchange_name, 8)
+    return interval_hours
 
 def calculate_apy(rate, interval_hours=8):
     if rate is None:
@@ -103,7 +124,7 @@ with st.status("Fetching funding rates...", expanded=True) as status_box:
             status_box.write(f"{ex}: failed in {dur:.2f}s -> {rates}")
         else:
             status_box.write(f"{ex}: {len(rates)} items in {dur:.2f}s")
-    status_box.update(label="Fetch complete", state="complete", expanded=True)
+    status_box.update(label=f"Fetch complete @ {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}", state="complete", expanded=True)
 
 # Build data_map with rate + interval
 data_map = {}
@@ -141,31 +162,28 @@ for symbol, rates in data_map.items():
         return row[f"{ex} APY%"]
 
     apys = []
-    apy_pairs = []
     for ex in ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]:
         val = set_rate(ex)
         if val is not None:
             apys.append(val)
-            apy_pairs.append((ex, val))
 
     if len([a for a in apys if a is not None]) < 2:
         skip_logs.append(symbol)
         continue
 
     valid_apys = [a for a in apys if a is not None]
-    apy_pairs.sort(key=lambda x: x[1], reverse=True)
-    top1, top2 = apy_pairs[0], apy_pairs[1]
-    row["Top Exchange"] = top1[0]
-    row["Top APY%"] = top1[1]
-    row["Second Exchange"] = top2[0]
-    row["Second APY%"] = top2[1]
-    row["APY Spread (%)"] = top1[1] - top2[1]
+    row["APY Spread (%)"] = max(valid_apys) - min(valid_apys)
     rows.append(row)
 
 if skip_logs:
     st.caption(f"Skipped {len(skip_logs)} symbols with <2 exchanges. Sample: {skip_logs[:5]}")
 
 df = pd.DataFrame(rows)
+# Reorder columns to surface spread near symbol
+if "APY Spread (%)" in df.columns:
+    cols = df.columns.tolist()
+    new_cols = ["Symbol", "APY Spread (%)"] + [c for c in cols if c not in ("Symbol", "APY Spread (%)")]
+    df = df[new_cols]
 
 st.markdown(
     "**说明**：资金费率按小时拆分，用对应交易所/符号的结算周期计算年化：`rate × (24/周期) × 365 × 100`；"
@@ -183,18 +201,29 @@ for ex in display_exchanges:
         )
         df.drop(columns=[int_col], inplace=True)
 
-st.dataframe(
-    df.style.format({
-        "Aster APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "EdgeX APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "Lighter APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "Hyperliquid APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "Binance APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        **({"Backpack APY%": (lambda x: "{:.2f}%".format(x) if x is not None else "-")} if "Backpack APY%" in df.columns else {}),
-        "Top APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "Second APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-        "APY Spread (%)": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    }).background_gradient(subset=[c for c in ["Aster APY%", "EdgeX APY%", "Lighter APY%", "Hyperliquid APY%", "Binance APY%", "Backpack APY%"] if c in df.columns], cmap="RdYlGn", vmin=-50, vmax=50),
-    width="stretch",
-    height=800
-)
+styler = df.style.format({
+    "Aster APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+    "EdgeX APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+    "Lighter APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+    "Hyperliquid APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+    "Binance APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+    **({"Backpack APY%": (lambda x: "{:.2f}%".format(x) if x is not None else "-")} if "Backpack APY%" in df.columns else {}),
+    "APY Spread (%)": lambda x: "{:.2f}%".format(x) if x is not None else "-",
+})
+spread_cols = [c for c in ["Aster APY%", "EdgeX APY%", "Lighter APY%", "Hyperliquid APY%", "Binance APY%", "Backpack APY%"] if c in df.columns]
+if spread_cols:
+    styler = styler.background_gradient(subset=spread_cols, cmap="RdYlGn", vmin=-50, vmax=50)
+if "APY Spread (%)" in df.columns:
+    # cap extremes to avoid a single outlier skewing colors
+    spread_vmin, spread_vmax = 0, 100
+    try:
+        if not df["APY Spread (%)"].empty:
+            spread_vmin = max(0, df["APY Spread (%)"].quantile(0.05))
+            spread_vmax = df["APY Spread (%)"].quantile(0.95)
+            if spread_vmax <= spread_vmin:
+                spread_vmax = spread_vmin + 1
+    except Exception:
+        pass
+    styler = styler.background_gradient(subset=["APY Spread (%)"], cmap="Oranges", vmin=spread_vmin, vmax=spread_vmax)
+
+st.dataframe(styler, width="stretch", height=800, hide_index=True)

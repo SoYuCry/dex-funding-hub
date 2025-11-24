@@ -4,3 +4,4 @@ requests
 streamlit
 streamlit-autorefresh
 websockets
+matplotlib
