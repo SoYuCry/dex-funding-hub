@@ -1,9 +1,6 @@
 import aiohttp
 from .base import Exchange
 import asyncio
-
-
-
 import json
 import os
 
@@ -14,110 +11,201 @@ class Binance(Exchange):
     def __init__(self):
         super().__init__("Binance", "https://fapi.binance.com")
         self.timeout = aiohttp.ClientTimeout(total=10)
-        self.interval_cache = self._load_cache()
+        self.interval_cache: dict[str, float] = self._load_cache()
         self._cache_dirty = False
 
-    def _load_cache(self):
+    # =============================
+    # Cache & symbol helpers
+    # =============================
+
+    def _normalize_symbol(self, symbol: str) -> str:
+        """统一处理为大写，避免缓存 miss / API 不一致。"""
+        return symbol.upper()
+
+    def _load_cache(self) -> dict[str, float]:
         try:
             if os.path.exists(CACHE_FILE):
                 with open(CACHE_FILE, "r") as f:
                     data = json.load(f)
-                return {k.upper(): v for k, v in data.items()}
+                # 保险起见，把 key 都 upper 一遍
+                return {k.upper(): float(v) for k, v in data.items()}
         except Exception:
             pass
         return {}
 
-    def _save_cache(self):
+    def _save_cache(self) -> None:
+        # 每次都取，因为 Binance 可能会调整 Interval
+        pass
         if not self._cache_dirty:
             return
         try:
             with open(CACHE_FILE, "w") as f:
                 json.dump(self.interval_cache, f, indent=2, sort_keys=True)
+            self._cache_dirty = False
         except Exception:
+            # 写入失败只影响缓存持久化，不要影响主流程
             pass
 
-    async def _fetch_interval_hours(self, symbol: str, session: aiohttp.ClientSession, nextFundingTime: int | None = None) -> float | None:
-        if symbol in self.interval_cache:
-            return self.interval_cache[symbol]
+    def _get_cached_interval(self, symbol: str) -> float | None:
+        """从缓存里拿 interval（小时），没有则返回 None。"""
+        sym = self._normalize_symbol(symbol)
+        return self.interval_cache.get(sym)
+
+    def _set_cached_interval(self, symbol: str, hrs: float) -> None:
+        """写缓存并标记 dirty。"""
+        sym = self._normalize_symbol(symbol)
+        self.interval_cache[sym] = float(hrs)
+        self._cache_dirty = True
+
+    # =============================
+    # 数据处理 helpers
+    # =============================
+
+    def _snap_hours(self, hrs: float) -> float:
+        """
+        把接近 8/4/1 小时的数 snap 到整数，避免精度误差导致看起来是 7.99998 之类。
+        """
+        if 7.9999 < hrs < 8.001:
+            return 8.0
+        if 3.9999 < hrs < 4.001:
+            return 4.0
+        if 0.9999 < hrs < 1.001:
+            return 1.0
+        return hrs
+
+    def _extract_funding_times(self, data: list[dict]) -> list[int]:
+        """
+        从 fundingRate 接口返回的数据中抽出 fundingTime 列表（毫秒时间戳）。
+        """
+        times: list[int] = []
+        for item in data:
+            t = item.get("fundingTime")
+            if isinstance(t, int):
+                times.append(t)
+        return times
+
+    # =============================
+    # 核心 interval 计算逻辑
+    # =============================
+
+    async def _fetch_interval_hours(
+        self,
+        symbol: str,
+        session: aiohttp.ClientSession,
+        nextFundingTime: int | None = None,
+    ) -> float | None:
+        """
+        根据 Binance fundingRate 接口推断 funding interval（小时）。
+        优先使用 nextFundingTime 与最近一次 fundingTime 的差值，
+        否则 fallback 到最近两次 fundingTime 的差值。
+        """
+        # 先查缓存
+        cached = self._get_cached_interval(symbol)
+        if cached is not None:
+            return cached
+
+        norm_symbol = self._normalize_symbol(symbol)
         url = f"{self.base_url}/fapi/v1/fundingRate"
-        params = {"symbol": symbol.upper(), "limit": 2}
+        params = {"symbol": norm_symbol, "limit": 2}
+
         try:
             async with session.get(url, params=params) as resp:
                 if resp.status != 200:
                     return None
-                data = await resp.json()
 
-                if isinstance(data, list) and len(data) >= 2:
-                    if nextFundingTime is not None:
-                        hrs = abs(nextFundingTime - t1) / 3600_000
-                        if 7.9999 < hrs < 8.001:
-                            hrs = 8
-                        if 3.9999 < hrs < 4.001:
-                            hrs = 4
-                        if 0.9999 < hrs < 1.001:
-                            hrs = 1
-                        self.interval_cache[symbol.upper()] = hrs
-                        self._cache_dirty = True
-                        return hrs
-                    # Fallback to calculating from the last two funding rates
-                    else:
-                        t1 = data[0].get("fundingTime")
-                        t2 = data[1].get("fundingTime")
-                        if isinstance(t1, int) and isinstance(t2, int):
-                            hrs = abs(t1 - t2) / 3600_000
-                            if 7.9999 < hrs < 8.001:
-                                hrs = 8
-                            if 3.9999 < hrs < 4.001:
-                                hrs = 4
-                            if 0.9999 < hrs < 1.001:
-                                hrs = 1
-                            self.interval_cache[symbol.upper()] = hrs
-                            self._cache_dirty = True
-                            return hrs
+                data = await resp.json()
+                if not isinstance(data, list) or len(data) == 0:
+                    return None
+
+                funding_times = self._extract_funding_times(data)
+                if not funding_times:
+                    return None
+
+                hrs: float | None = None
+
+                # 有 nextFundingTime 时优先用它：next - 最近的一次 fundingTime
+                if nextFundingTime is not None:
+                    t_last = funding_times[0]  # Binance 一般 index 0 是最近一条
+                    hrs = abs(nextFundingTime - t_last) / 3_600_000
+                # 否则，退化成用最近两次 fundingTime 的间隔
+                elif len(funding_times) >= 2:
+                    t1, t2 = funding_times[0], funding_times[1]
+                    hrs = abs(t1 - t2) / 3_600_000
+
+                if hrs is None:
+                    return None
+
+                hrs = self._snap_hours(hrs)
+                self._set_cached_interval(norm_symbol, hrs)
+                return hrs
+
         except Exception:
             return None
-        return None
+
+    # =============================
+    # 对外接口
+    # =============================
 
     async def get_funding_rate(self, symbol: str) -> dict:
+        norm_symbol = self._normalize_symbol(symbol)
         url = f"{self.base_url}/fapi/v1/premiumIndex"
-        params = {"symbol": symbol.upper()}
+        params = {"symbol": norm_symbol}
+
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
             async with session.get(url, params=params) as resp:
                 if resp.status != 200:
                     raise Exception(f"Binance API error: {resp.status}")
+
                 data = await resp.json()
-                nextFundingTime = int(data.get("nextFundingTime", 0)) if data.get("nextFundingTime") else None
-                interval_hours = await self._fetch_interval_hours(symbol, session, nextFundingTime)
+
+                nextFundingTime = (
+                    int(data.get("nextFundingTime", 0))
+                    if data.get("nextFundingTime") else None
+                )
+
+                interval_hours = await self._fetch_interval_hours(
+                    norm_symbol, session, nextFundingTime
+                )
+
+                # 单次查询也顺便把 cache 刷到磁盘（可按需去掉，减少 IO）
+                self._save_cache()
 
                 return {
                     "exchange": self.name,
-                    "symbol": symbol.upper(),
+                    "symbol": norm_symbol,
                     "rate": float(data["lastFundingRate"]),
                     "timestamp": int(data["time"]),
                     "nextFundingTime": nextFundingTime,
-                    "interval_hours": interval_hours
+                    "interval_hours": interval_hours,
                 }
 
     async def get_all_funding_rates(self) -> list[dict]:
         url = f"{self.base_url}/fapi/v1/premiumIndex"
+
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     raise Exception(f"Binance API error: {resp.status}")
-                data = await resp.json()
-                results = []
 
+                data = await resp.json()
                 semaphore = asyncio.Semaphore(5)
 
-                async def enrich(item):
+                async def enrich(item: dict) -> dict:
                     async with semaphore:
-                        hrs = await self._fetch_interval_hours(item["symbol"], session)
+                        symbol = self._normalize_symbol(item["symbol"])
+                        nextFundingTime = (
+                            int(item.get("nextFundingTime", 0))
+                            if item.get("nextFundingTime") else None
+                        )
+                        hrs = await self._fetch_interval_hours(
+                            symbol, session, nextFundingTime
+                        )
                         return {
                             "exchange": self.name,
-                            "symbol": item["symbol"],
+                            "symbol": symbol,
                             "rate": float(item["lastFundingRate"]),
                             "timestamp": int(item["time"]),
-                            "nextFundingTime": int(item.get("nextFundingTime", 0)) if item.get("nextFundingTime") else None,
+                            "nextFundingTime": nextFundingTime,
                             "interval_hours": hrs,
                         }
 
