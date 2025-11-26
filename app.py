@@ -2,9 +2,11 @@ import asyncio
 import time
 import json
 import os
+from pathlib import Path
+from uuid import uuid4
+import logging
 
 import pandas as pd
-import requests
 import streamlit as st
 
 from exchanges.aster import Aster
@@ -20,10 +22,54 @@ try:
 except ImportError:
     st_autorefresh = None
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
+)
+logger = logging.getLogger("funding_monitor")
+
 st.set_page_config(page_title="Funding Fee Monitor", layout="wide")
 st.title("Crypto Funding Fee Monitor")
 if st_autorefresh:
     st_autorefresh(interval=60_000, key="data_refresh")
+
+VISIT_LOG_PATH = Path("visit_log.jsonl")
+
+def record_visit_once():
+    if "session_id" not in st.session_state:
+        st.session_state["session_id"] = str(uuid4())
+    if st.session_state.get("visit_recorded"):
+        return
+
+    ts_ms = int(time.time() * 1000)
+    entry = {
+        "ts": ts_ms,
+        "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ts_ms / 1000)),
+        "session": st.session_state["session_id"],
+    }
+    try:
+        with VISIT_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        # Keep UI clean; log server-side only
+        logger.error("Visit log write failed: %s", e)
+    st.session_state["visit_recorded"] = True
+
+def get_visit_count() -> int | None:
+    try:
+        with VISIT_LOG_PATH.open("r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+    except FileNotFoundError:
+        return 0
+    except Exception as e:
+        logger.error("Visit log read failed: %s", e)
+        return None
+
+record_visit_once()
+visit_total = get_visit_count()
+st.metric("Total visits", visit_total if visit_total is not None else "N/A")
 
 # Defaults if interval is missing
 DEFAULT_INTERVAL_HOURS = {
@@ -106,11 +152,11 @@ def get_all_rates():
         try:
             rates = await exchange.get_all_funding_rates()
             duration = time.time() - start
-            print(f"[Fetch] {exchange.name} success: {len(rates)} items in {duration:.2f}s")
+            logger.info("[Fetch] %s success: %d items in %.2fs", exchange.name, len(rates), duration)
             return {"exchange_name": exchange.name, "rates": rates, "duration": duration}
         except Exception as e:
             duration = time.time() - start
-            print(f"[Fetch] {exchange.name} failed in {duration:.2f}s: {e}")
+            logger.error("[Fetch] %s failed in %.2fs: %s", exchange.name, duration, e)
             return {"exchange_name": exchange.name, "rates": e, "duration": duration}
 
     async def fetch_all():
@@ -118,10 +164,6 @@ def get_all_rates():
         return await asyncio.gather(*tasks)
 
     return asyncio.run(fetch_all())
-
-
-if st.button("Refresh Data"):
-    st.cache_data.clear()
 
 with st.status("Fetching funding rates...", expanded=True) as status_box:
     raw_results_with_names = get_all_rates()

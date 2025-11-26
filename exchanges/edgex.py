@@ -4,6 +4,7 @@ import os
 import json
 import time
 import websockets
+import logging
 from .base import Exchange
 
 class EdgeX(Exchange):
@@ -15,6 +16,7 @@ class EdgeX(Exchange):
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         self.timeout = aiohttp.ClientTimeout(total=10)
+        self.logger = logging.getLogger("EdgeX")
         # Optional manual cookies to bypass Cloudflare if needed (set EDGEX_COOKIES="key1=val; key2=val")
         raw_cookie = os.environ.get("EDGEX_COOKIES")
         self.cookies = {}
@@ -155,7 +157,7 @@ class EdgeX(Exchange):
                         "interval_hours": interval_hours
                     }
                 except Exception as e:
-                    print(f"Error fetching EdgeX rate for {contract['contractName']}: {e}")
+                    self.logger.warning("Error fetching EdgeX rate for %s: %s", contract["contractName"], e)
                     return None
 
             # Limit concurrency to avoid rate limits
@@ -231,5 +233,5 @@ class EdgeX(Exchange):
         try:
             return await self._fetch_all_funding_ws()
         except Exception as e_ws:
-            print(f"EdgeX WS funding failed: {e_ws}, falling back to HTTP (may be rate limited)")
+            self.logger.warning("EdgeX WS funding failed: %s, falling back to HTTP (may be rate limited)", e_ws)
             return await self._fetch_all_funding_http()

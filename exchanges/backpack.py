@@ -2,6 +2,7 @@ import aiohttp
 import time
 import asyncio
 from datetime import datetime
+import logging
 from .base import Exchange
 
 
@@ -9,6 +10,7 @@ class Backpack(Exchange):
     def __init__(self):
         super().__init__("Backpack", "https://api.backpack.exchange")
         self.timeout = aiohttp.ClientTimeout(total=10)
+        self.logger = logging.getLogger("Backpack")
 
     async def _get_markets(self):
         url = f"{self.base_url}/api/v1/markets"
@@ -126,18 +128,18 @@ class Backpack(Exchange):
                         if resp.status == 200:
                             data = await resp.json()
                             if isinstance(data, list) and data:
-                                rate = data[0].get("fundingRate")
-                                ts = self._parse_ts(data[0].get("intervalEndTimestamp"), ts_now)
-                            else:
-                                print(f"[Backpack] empty history for {symbol_api}")
-                        else:
-                            failures += 1
-                            print(f"[Backpack] HTTP {resp.status} for {symbol_api}")
-                            return None
-                except Exception as e:
+                        rate = data[0].get("fundingRate")
+                        ts = self._parse_ts(data[0].get("intervalEndTimestamp"), ts_now)
+                    else:
+                        self.logger.warning("History empty for %s", symbol_api)
+                else:
                     failures += 1
-                    print(f"[Backpack] exception for {symbol_api}: {e}")
+                    self.logger.warning("HTTP %s for %s", resp.status, symbol_api)
                     return None
+            except Exception as e:
+                failures += 1
+                self.logger.warning("Exception for %s: %s", symbol_api, e)
+                return None
 
                 if rate is None:
                     failures += 1
@@ -159,5 +161,5 @@ class Backpack(Exchange):
             fetched = await asyncio.gather(*(guarded_fetch(m) for m in perps))
             results = [r for r in fetched if r is not None]
 
-        # print(f"[Backpack] perps={len(perps)} success={len(results)} failures={failures}")
+        # self.logger.info("Perps=%d success=%d failures=%d", len(perps), len(results), failures)
         return results
