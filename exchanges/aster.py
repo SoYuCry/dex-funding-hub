@@ -66,20 +66,26 @@ class Aster(Exchange):
                 if not isinstance(data, list) or len(data) == 0:
                     return None
 
-                # 提取 fundingTime（毫秒时间戳）
-                t1 = data[0].get("fundingTime")
-                t2 = data[1].get("fundingTime") if len(data) > 1 else None
+                # 提取 fundingTime（毫秒时间戳），并统一按时间降序（最新在前）
+                funding_times = []
+                for item in data:
+                    t = item.get("fundingTime")
+                    if isinstance(t, int):
+                        funding_times.append(t)
+                funding_times.sort(reverse=True)
 
-                if not isinstance(t1, int):
+                if not funding_times:
                     return None
 
                 # 优先用 nextFundingTime 与最近一次 fundingTime 的差
                 if nextFundingTime is not None:
-                    hrs = abs(nextFundingTime - t1) / 3_600_000
+                    t_last = funding_times[0]
+                    hrs = abs(nextFundingTime - t_last) / 3_600_000
                 else:
                     # fallback: 用最近两次 fundingTime 的差
-                    if not isinstance(t2, int):
+                    if len(funding_times) < 2:
                         return None
+                    t1, t2 = funding_times[0], funding_times[1]
                     hrs = abs(t1 - t2) / 3_600_000
 
                 return self._snap_hours(hrs)

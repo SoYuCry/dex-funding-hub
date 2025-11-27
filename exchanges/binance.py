@@ -36,26 +36,34 @@ class Binance(Exchange):
     def _save_cache(self) -> None:
         # 每次都取，因为 Binance 可能会调整 Interval
         pass
-        if not self._cache_dirty:
-            return
-        try:
-            with open(CACHE_FILE, "w") as f:
-                json.dump(self.interval_cache, f, indent=2, sort_keys=True)
-            self._cache_dirty = False
-        except Exception:
-            # 写入失败只影响缓存持久化，不要影响主流程
-            pass
+        # if not self._cache_dirty:
+        #     return
+        # try:
+        #     with open(CACHE_FILE, "w") as f:
+        #         json.dump(self.interval_cache, f, indent=2, sort_keys=True)
+        #     self._cache_dirty = False
+        # except Exception:
+        #     # 写入失败只影响缓存持久化，不要影响主流程
+        #     pass
 
     def _get_cached_interval(self, symbol: str) -> float | None:
         """从缓存里拿 interval（小时），没有则返回 None。"""
         sym = self._normalize_symbol(symbol)
-        return self.interval_cache.get(sym)
+        hrs = self.interval_cache.get(sym)
+        # 历史缓存里可能有异常值（曾用错误时间序导致 16h/数千小时等），过滤掉
+        if hrs is None:
+            return None
+        if not (0.25 <= hrs <= 12):
+            return None
+        return hrs
 
     def _set_cached_interval(self, symbol: str, hrs: float) -> None:
         """写缓存并标记 dirty。"""
         sym = self._normalize_symbol(symbol)
-        self.interval_cache[sym] = float(hrs)
-        self._cache_dirty = True
+        val = float(hrs)
+        if 0.25 <= val <= 12:
+            self.interval_cache[sym] = val
+            self._cache_dirty = True
 
     # =============================
     # 数据处理 helpers
@@ -82,7 +90,8 @@ class Binance(Exchange):
             t = item.get("fundingTime")
             if isinstance(t, int):
                 times.append(t)
-        return times
+        # Binance 返回的列表有时是升序，这里统一降序（最新在前）
+        return sorted(times, reverse=True)
 
     # =============================
     # 核心 interval 计算逻辑
@@ -125,7 +134,8 @@ class Binance(Exchange):
 
                 # 有 nextFundingTime 时优先用它：next - 最近的一次 fundingTime
                 if nextFundingTime is not None:
-                    t_last = funding_times[0]  # Binance 一般 index 0 是最近一条
+                    # funding_times 已经按时间降序排序，index 0 为最新一次
+                    t_last = funding_times[0]
                     hrs = abs(nextFundingTime - t_last) / 3_600_000
                 # 否则，退化成用最近两次 fundingTime 的间隔
                 elif len(funding_times) >= 2:
