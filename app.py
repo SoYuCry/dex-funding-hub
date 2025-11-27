@@ -31,17 +31,32 @@ logging.basicConfig(
 logger = logging.getLogger("funding_monitor")
 
 st.set_page_config(page_title="Funding Fee Monitor", layout="wide")
-st.title("Crypto Funding Fee Monitor")
+st.title("DEXs 资金费率面板")
 if st_autorefresh:
     st_autorefresh(interval=60_000, key="data_refresh")
+
+# square-ish popover trigger for the gear
+st.markdown(
+    """
+<style>
+button[data-testid="stPopover"] {
+  width: 40px;
+  height: 40px;
+  padding: 6px;
+  border-radius: 10px;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 SOCIAL_HTML = """
 <style>
 .social-container {
-  position: absolute;
-  top: 10px;
+  position: fixed;
+  bottom: 14px;
   right: 16px;
-  z-index: 100;
+  z-index: 1000;
 }
 .social-row {display:flex; gap:10px; margin:0;}
 .social-row a {
@@ -102,6 +117,9 @@ def get_visit_count() -> int | None:
         return None
 
 record_visit_once()
+visit_count = get_visit_count()
+if visit_count is not None:
+    st.caption(f"总访问量 {visit_count}")
 
 # Defaults if interval is missing
 DEFAULT_INTERVAL_HOURS = {
@@ -171,9 +189,13 @@ def extract_interval_hours(item: dict, exchange_name: str) -> float:
     return DEFAULT_INTERVAL_HOURS.get(exchange_name, 8)
 
 def calculate_apy(rate, interval_hours=8):
-    if rate is None:
+    if rate is None or interval_hours in (None, 0):
         return None
     return rate * (24 / interval_hours) * 365 * 100
+
+# Session data for cached fetch + selection
+if "selected_exchanges" not in st.session_state:
+    st.session_state["selected_exchanges"] = ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]
 
 @st.cache_data(ttl=60)
 def get_all_rates():
@@ -195,19 +217,57 @@ def get_all_rates():
         tasks = [fetch_one(ex) for ex in exchanges]
         return await asyncio.gather(*tasks)
 
-    return asyncio.run(fetch_all())
+    fetched = asyncio.run(fetch_all())
+    return {"data": fetched, "ts": time.time()}
 
-with st.status("Fetching funding rates...", expanded=True) as status_box:
-    raw_results_with_names = get_all_rates()
-    for entry in raw_results_with_names:
-        ex = entry["exchange_name"]
-        dur = entry.get("duration", 0)
-        rates = entry["rates"]
-        if isinstance(rates, Exception):
-            status_box.write(f"{ex}: failed in {dur:.2f}s -> {rates}")
-        else:
-            status_box.write(f"{ex}: {len(rates)} items in {dur:.2f}s")
-    status_box.update(label=f"Fetch complete @ {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}", state="complete", expanded=True)
+default_exchanges = ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]
+
+res_bundle = get_all_rates()
+raw_results_with_names = res_bundle["data"]
+last_update_ts = res_bundle["ts"]
+last_update = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_update_ts))
+
+status_row = st.columns([5, 1])
+with status_row[0]:
+    st.caption(f"Last update: {last_update}")
+with status_row[1]:
+    gear_cols = st.columns([1, 1])
+    with gear_cols[1]:
+        try:
+            with st.popover("⚙", width="stretch"):
+                st.markdown("**展示的交易所**")
+                rows = [st.columns(3), st.columns(3)]
+                selections = []
+                for idx, ex in enumerate(default_exchanges):
+                    row = rows[idx // 3]
+                    with row[idx % 3]:
+                        val = st.checkbox(
+                            ex,
+                            key=f"exchange_checkbox_{ex}",
+                            value=ex in st.session_state["selected_exchanges"],
+                        )
+                    selections.append((ex, val))
+                chosen = [ex for ex, val in selections if val]
+                if chosen:
+                    st.session_state["selected_exchanges"] = chosen
+        except Exception:
+            with st.expander("⚙"):
+                rows = [st.columns(3), st.columns(3)]
+                selections = []
+                for idx, ex in enumerate(default_exchanges):
+                    row = rows[idx // 3]
+                    with row[idx % 3]:
+                        val = st.checkbox(
+                            ex,
+                            key=f"exchange_checkbox_fallback_{ex}",
+                            value=ex in st.session_state["selected_exchanges"],
+                        )
+                    selections.append((ex, val))
+                chosen = [ex for ex, val in selections if val]
+                if chosen:
+                    st.session_state["selected_exchanges"] = chosen
+
+display_exchanges = st.session_state.get("selected_exchanges") or default_exchanges
 
 # Build data_map with rate + interval
 data_map = {}
@@ -245,7 +305,7 @@ for symbol, rates in data_map.items():
         return row[f"{ex} APY%"]
 
     apys = []
-    for ex in ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]:
+    for ex in display_exchanges:
         val = set_rate(ex)
         if val is not None:
             apys.append(val)
@@ -257,9 +317,6 @@ for symbol, rates in data_map.items():
     valid_apys = [a for a in apys if a is not None]
     row["APY Spread (%)"] = max(valid_apys) - min(valid_apys)
     rows.append(row)
-
-if skip_logs:
-    st.caption(f"Skipped {len(skip_logs)} symbols with <2 exchanges. Sample: {skip_logs[:5]}")
 
 df = pd.DataFrame(rows)
 # Reorder columns to surface spread near symbol
@@ -273,8 +330,8 @@ st.markdown(
     " SPREAD 基于年化 APY：`(最高APY - 最低APY)`。"
 )
 
-display_exchanges = ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]
-for ex in display_exchanges:
+# 把 Rate + Interval 合并成一个字符串列，动态检查是否存在
+for ex in default_exchanges:
     rate_col = f"{ex} Rate"
     int_col = f"{ex} Interval (h)"
     if rate_col in df.columns and int_col in df.columns:
@@ -284,16 +341,19 @@ for ex in display_exchanges:
         )
         df.drop(columns=[int_col], inplace=True)
 
-styler = df.style.format({
-    "Aster APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    "EdgeX APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    "Lighter APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    "Hyperliquid APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    "Binance APY%": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-    **({"Backpack APY%": (lambda x: "{:.2f}%".format(x) if x is not None else "-")} if "Backpack APY%" in df.columns else {}),
-    "APY Spread (%)": lambda x: "{:.2f}%".format(x) if x is not None else "-",
-})
-spread_cols = [c for c in ["Aster APY%", "EdgeX APY%", "Lighter APY%", "Hyperliquid APY%", "Binance APY%", "Backpack APY%"] if c in df.columns]
+fmt_dict = {}
+apy_cols_in_df = [c for c in df.columns if c.endswith("APY%") and c != "APY Spread (%)"]
+for col in apy_cols_in_df:
+    fmt_dict[col] = (lambda x: "{:.2f}%".format(x) if x is not None else "-")
+
+if "APY Spread (%)" in df.columns:
+    fmt_dict["APY Spread (%)"] = (lambda x: "{:.2f}%".format(x) if x is not None else "-")
+
+styler = df.style.format(fmt_dict)
+
+# 用实际存在的 APY 列作为 heatmap 的列
+spread_cols = apy_cols_in_df.copy()
+
 if spread_cols:
     styler = styler.background_gradient(subset=spread_cols, cmap="RdYlGn", vmin=-50, vmax=50)
 if "APY Spread (%)" in df.columns:
@@ -309,4 +369,31 @@ if "APY Spread (%)" in df.columns:
         pass
     styler = styler.background_gradient(subset=["APY Spread (%)"], cmap="Oranges", vmin=spread_vmin, vmax=spread_vmax)
 
-st.dataframe(styler, width="stretch", height=800, hide_index=True)
+def _highlight_extremes(row):
+    # 与 spread_cols 对齐
+    apy_cols = [c for c in spread_cols if c in row.index]
+    styles = ["" for _ in apy_cols]
+    if not apy_cols:
+        return styles
+    vals = row[apy_cols].dropna()
+    if vals.empty:
+        return styles
+    max_v = vals.max()
+    min_v = vals.min()
+    for idx, col in enumerate(apy_cols):
+        if pd.isna(row[col]):
+            continue
+        if row[col] == max_v:
+            styles[idx] = "box-shadow: 0 0 0 1px rgba(0,200,120,0.45); border-radius: 6px;"
+        elif row[col] == min_v:
+            styles[idx] = "box-shadow: 0 0 0 1px rgba(255,120,180,0.45); border-radius: 6px;"
+    return styles
+
+if spread_cols:
+    styler = styler.apply(_highlight_extremes, subset=spread_cols, axis=1)
+
+# 回到 Streamlit 自带的 dataframe（保留排序/过滤）；高度随行数自适应，避免内部滚动条
+row_height = 38
+base_height = 120
+table_height = base_height + max(len(df), 1) * row_height
+st.dataframe(styler, width="stretch", hide_index=True, height=table_height, key="rates_table")
