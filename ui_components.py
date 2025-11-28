@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
+import textwrap
 import streamlit as st
 
 logger = logging.getLogger("funding_monitor")
@@ -192,176 +193,190 @@ def render_rates_table(df):
 
     # HTML Rendering
     html = styler.to_html()
-    
+
     # Generate unique ID for this table instance
     import random
     table_id = f"sortable_table_{random.randint(1000, 9999)}"
-    
-    st.markdown(
-        f"""
+
+    # Inject table ID into the HTML
+    html_with_id = html.replace("<table", f'<table id="{table_id}"', 1)
+
+    css_block = textwrap.dedent(
+        """
         <style>
         /* Container styling */
-        .custom-table-container {{
+        .custom-table-wrapper {
             width: 100%;
-        }}
-        
+            overflow: visible; /* allow sticky to escape potential clipping */
+            background-color: #0b0f19;
+            padding-top: 0;
+        }
+        .custom-table-container {
+            width: 100%;
+            overflow: visible;
+        }
+        .custom-table-wrapper::before {
+            content: none;
+        }
+
         /* Table styling */
-        .custom-table-container table {{
+        .custom-table-container table {
             width: 100%;
             border-collapse: collapse;
-            font-family: "Source Sans Pro", sans-serif;
+            border-spacing: 0;
+            font-family: "Source Sans", "Source Sans Pro", "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             font-size: 14px;
-        }}
-        
-        /* Sticky Header with solid background */
-        .custom-table-container thead tr th {{
+            background-color: #0b0f19;
+            color: #e9edf5;
+        }
+
+        .custom-table-container thead {
+            position: sticky;
+            top: 3.75rem; /* align with Streamlit top padding/header */
+            z-index: 998;
+            background-color: #0b0f19;
+            box-shadow: 0 -3.75rem 0 0 #0b0f19; /* cover gap above */
+        }
+
+        /* Sticky Header with opaque background */
+        .custom-table-container thead tr th {
             position: sticky;
             top: 3.75rem;
-            background-color: #0e1117; /* Solid dark background */
+            background-color: #0b0f19;
             z-index: 999;
             padding: 8px;
             text-align: right;
-            border-bottom: 2px solid #444;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            border-bottom: 2px solid #303645;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.45);
             cursor: pointer;
             user-select: none;
-        }}
-        
+            color: #e9edf5;
+        }
+
         /* Light mode header background */
-        @media (prefers-color-scheme: light) {{
-            .custom-table-container thead tr th {{
-                background-color: #ffffff;
-                border-bottom: 2px solid #ddd;
-            }}
-        }}
-        
+        @media (prefers-color-scheme: light) {
+            .custom-table-wrapper {
+                background-color: #f8f9fb;
+            }
+            .custom-table-wrapper::before {
+                background-color: #f8f9fb;
+            }
+            .custom-table-container thead {
+                background-color: #f8f9fb;
+                box-shadow: 0 -3.75rem 0 0 #f8f9fb;
+            }
+
+            .custom-table-container thead tr th {
+                background-color: #f8f9fb;
+                border-bottom: 2px solid #d7dbe3;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+                color: #0b0f19;
+            }
+        }
+
         /* Header hover effect */
-        .custom-table-container thead tr th:hover {{
-            background-color: #1a1d24;
-        }}
-        
-        @media (prefers-color-scheme: light) {{
-            .custom-table-container thead tr th:hover {{
-                background-color: #f0f0f0;
-            }}
-        }}
-        
+        .custom-table-container thead tr th:hover {
+            background-color: #141a25;
+        }
+
+        @media (prefers-color-scheme: light) {
+            .custom-table-container thead tr th:hover {
+                background-color: #eef1f5;
+            }
+        }
+
         /* Sort indicator */
-        .custom-table-container thead tr th::after {{
+        .custom-table-container thead tr th::after {
             content: ' ⇅';
             opacity: 0.3;
             font-size: 0.8em;
-        }}
-        
-        .custom-table-container thead tr th.sort-asc::after {{
+        }
+
+        .custom-table-container thead tr th.sort-asc::after {
             content: ' ▲';
             opacity: 1;
-        }}
-        
-        .custom-table-container thead tr th.sort-desc::after {{
+        }
+
+        .custom-table-container thead tr th.sort-desc::after {
             content: ' ▼';
             opacity: 1;
-        }}
-        
+        }
+
         /* Cell styling */
-        .custom-table-container tbody tr td {{
+        .custom-table-container tbody tr td {
             padding: 8px;
             text-align: right;
             border-bottom: 1px solid #333;
-        }}
-        
+            color: #e9edf5;
+        }
+
         /* Hover effect */
-        .custom-table-container tbody tr:hover {{
+        .custom-table-container tbody tr:hover {
             background-color: rgba(255, 255, 255, 0.05);
-        }}
+        }
+
+        @media (prefers-color-scheme: light) {
+            .custom-table-container table {
+                background-color: #ffffff;
+                color: #0b0f19;
+            }
+            .custom-table-container tbody tr td {
+                border-bottom: 1px solid #e6e8ef;
+                color: #0b0f19;
+            }
+        }
         </style>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Inject table ID into the HTML
-    html_with_id = html.replace('<table', f'<table id="{table_id}"', 1)
-    
-    # Render table and JavaScript separately for better timing
-    st.markdown(f'<div class="custom-table-container">{html_with_id}</div>', unsafe_allow_html=True)
-    
-    # Add JavaScript with better timing
-    st.markdown(
-        f"""
-        <script>
-        (function() {{
-            function initTableSort() {{
-                const table = document.getElementById('{table_id}');
-                if (!table) {{
-                    console.log('Table {table_id} not found, retrying...');
-                    setTimeout(initTableSort, 200);
-                    return;
+        """
+    ).strip()
+
+    # Render style and then the table HTML separately to avoid Markdown treating it as code
+    st.markdown(css_block, unsafe_allow_html=True)
+    st.markdown(f'<div class="custom-table-wrapper"><div class="custom-table-container">{html_with_id}</div></div>', unsafe_allow_html=True)
+
+    # Inject sorting script via component; it manipulates parent DOM to avoid iframe scroll
+    sort_script = f"""
+    <script>
+    (function() {{
+        function initTableSort(attempt) {{
+            const doc = window.parent.document;
+            const table = doc.getElementById('{table_id}');
+            if (!table) {{
+                if (attempt < 8) {{
+                    setTimeout(() => initTableSort(attempt + 1), 150);
                 }}
-                
-                console.log('Initializing sort for table {table_id}');
-                const headers = table.querySelectorAll('thead th');
-                let currentSort = {{ col: -1, asc: true }};
-                
-                headers.forEach((header, index) => {{
-                    header.addEventListener('click', function() {{
-                        console.log('Clicked column', index);
-                        const tbody = table.querySelector('tbody');
-                        const rows = Array.from(tbody.querySelectorAll('tr'));
-                        
-                        // Determine sort direction
-                        const asc = currentSort.col === index ? !currentSort.asc : true;
-                        currentSort = {{ col: index, asc: asc }};
-                        
-                        // Remove sort classes from all headers
-                        headers.forEach(h => {{
-                            h.classList.remove('sort-asc', 'sort-desc');
-                        }});
-                        
-                        // Add sort class to current header
-                        header.classList.add(asc ? 'sort-asc' : 'sort-desc');
-                        
-                        // Sort rows
-                        rows.sort((a, b) => {{
-                            const aCell = a.cells[index];
-                            const bCell = b.cells[index];
-                            
-                            if (!aCell || !bCell) return 0;
-                            
-                            // Get text content, removing % and other formatting
-                            let aVal = aCell.textContent.trim().replace('%', '').replace(',', '');
-                            let bVal = bCell.textContent.trim().replace('%', '').replace(',', '');
-                            
-                            // Try to parse as number
-                            const aNum = parseFloat(aVal);
-                            const bNum = parseFloat(bVal);
-                            
-                            // If both are numbers, compare numerically
-                            if (!isNaN(aNum) && !isNaN(bNum)) {{
-                                return asc ? aNum - bNum : bNum - aNum;
-                            }}
-                            
-                            // Otherwise compare as strings
-                            if (aVal < bVal) return asc ? -1 : 1;
-                            if (aVal > bVal) return asc ? 1 : -1;
-                            return 0;
-                        }});
-                        
-                        // Re-append sorted rows
-                        rows.forEach(row => tbody.appendChild(row));
-                    }});
-                }});
-                
-                console.log('Sort initialized for', headers.length, 'columns');
+                return;
             }}
-            
-            // Try multiple times with increasing delays
-            setTimeout(initTableSort, 100);
-            setTimeout(initTableSort, 500);
-            setTimeout(initTableSort, 1000);
-        }})();
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
-
-
+            const headers = table.querySelectorAll('thead th');
+            if (!headers.length) return;
+            let currentSort = {{ col: -1, asc: true }};
+            headers.forEach((header, index) => {{
+                header.addEventListener('click', function() {{
+                    const tbody = table.querySelector('tbody');
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const asc = currentSort.col === index ? !currentSort.asc : true;
+                    currentSort = {{ col: index, asc }};
+                    headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+                    header.classList.add(asc ? 'sort-asc' : 'sort-desc');
+                    rows.sort((a, b) => {{
+                        const aCell = a.cells[index];
+                        const bCell = b.cells[index];
+                        if (!aCell || !bCell) return 0;
+                        let aVal = aCell.textContent.trim().replace('%', '').replace(',', '');
+                        let bVal = bCell.textContent.trim().replace('%', '').replace(',', '');
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {{
+                            return asc ? aNum - bNum : bNum - aNum;
+                        }}
+                        return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                    }});
+                    rows.forEach(row => tbody.appendChild(row));
+                }});
+            }});
+        }}
+        initTableSort(0);
+        setTimeout(() => initTableSort(0), 300);
+    }})();
+    </script>
+    """
+    st.components.v1.html(sort_script, height=0, width=0, scrolling=False)
