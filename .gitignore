@@ -13,3 +13,5 @@ venv/
 # Streamlit cache
 .streamlit/
 
+# Local visit log
+visit_log.jsonl
