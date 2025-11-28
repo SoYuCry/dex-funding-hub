@@ -44,7 +44,7 @@ SOCIAL_HTML = """
 <div class="social-container">
   <div class="social-row">
     <a class="x-link" href="https://x.com/0xYuCry" target="_blank" rel="noopener noreferrer">✕ <span>X</span></a>
-    <a class="tg-link" href="https://t.me/journey_of_someone" target="_blank" rel="noopener noreferrer">✈ <span>Telegram</span></a>
+    <a class="tg-link" href="https://t.me/+gBbEJUXAKn81NGJl" target="_blank" rel="noopener noreferrer">✈ <span>Telegram</span></a>
   </div>
 </div>
 """
@@ -81,16 +81,6 @@ def _get_palette(theme_mode: str):
 def render_social_links():
     st.markdown(SOCIAL_HTML, unsafe_allow_html=True)
 
-
-def render_theme_toggle() -> str:
-    """
-    Getter for current theme_mode stored in session_state.
-
-    主题调整已经移动到设置齿轮里，这里不再渲染控件，只返回当前值。
-    """
-    if "theme_mode" not in st.session_state:
-        st.session_state["theme_mode"] = "auto"
-    return st.session_state["theme_mode"]
 
 def render_global_theme_styles(theme_mode: str):
     palette = _get_palette(theme_mode)
@@ -192,17 +182,11 @@ def render_visit_counter():
         )
 def render_settings_popover(default_exchanges):
     """
-    设置齿轮：包含 主题切换 + 交易所选择
-
-    主题写回 st.session_state["theme_mode"]，你可以用 render_theme_toggle() 读出来。
+    设置齿轮：只包含 交易所选择（已移除主题切换）
     """
-    # 先初始化 theme_mode
-    if "theme_mode" not in st.session_state:
-        st.session_state["theme_mode"] = "auto"
+    # 固定用暗色调来渲染齿轮按钮外观
+    palette = _get_palette("dark")
 
-    palette = _get_palette(st.session_state["theme_mode"])
-
-    # ✅ 正确缩小 popover 按钮
     st.markdown(
         f"""
     <style>
@@ -217,8 +201,8 @@ def render_settings_popover(default_exchanges):
         width: 28px;
         height: 28px;
         padding: 0;
-        min-width: 0;                     /* 取消默认最小宽度 */
-        border-radius: 999px;             /* 小圆按钮 */
+        min-width: 0;
+        border-radius: 999px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -240,7 +224,7 @@ def render_settings_popover(default_exchanges):
         unsafe_allow_html=True,
     )
 
-    # ====== 下面保持你原来的逻辑 ======
+    # 初始化交易所多选
     if "selected_exchanges" not in st.session_state:
         st.session_state["selected_exchanges"] = list(default_exchanges)
 
@@ -250,55 +234,16 @@ def render_settings_popover(default_exchanges):
             st.session_state[key] = ex in st.session_state["selected_exchanges"]
 
     try:
-        # 这里建议把 width="stretch" 去掉
         with st.popover("⚙"):
-            st.markdown("**主题**")
-            options = list(THEME_LABELS.keys())
-            default_idx = (
-                options.index(st.session_state["theme_mode"])
-                if st.session_state["theme_mode"] in options
-                else 0
-            )
-            choice = st.radio(
-                "主题切换",
-                options=options,
-                index=default_idx,
-                format_func=lambda k: THEME_LABELS[k],
-                key="theme_mode_radio",
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-            st.session_state["theme_mode"] = choice
-
-            st.markdown("---")
             st.markdown("**展示的交易所**")
             rows = [st.columns(3), st.columns(3)]
             for idx, ex in enumerate(default_exchanges):
                 row = rows[idx // 3]
                 with row[idx % 3]:
                     st.checkbox(ex, key=f"chk_{ex}")
-
     except Exception:
         with st.expander("⚙"):
-            st.markdown("**主题**")
-            options = list(THEME_LABELS.keys())
-            default_idx = (
-                options.index(st.session_state["theme_mode"])
-                if st.session_state["theme_mode"] in options
-                else 0
-            )
-            choice = st.radio(
-                "主题切换",
-                options=options,
-                index=default_idx,
-                format_func=lambda k: THEME_LABELS[k],
-                key="theme_mode_radio",
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-            st.session_state["theme_mode"] = choice
-
-            st.markdown("---")
+            st.markdown("**展示的交易所**")
             rows = [st.columns(3), st.columns(3)]
             for idx, ex in enumerate(default_exchanges):
                 row = rows[idx // 3]
@@ -338,7 +283,7 @@ def render_last_update(ts: str, theme_mode: str = "auto"):
     st.markdown(
         f"""
         <div style="
-            text-align:right;
+            text-align:left;
             font-size:14px;
             color:{palette['text']};
             font-weight:500;

@@ -33,25 +33,63 @@ ui_components.render_social_links()
 
 # ============ 数据获取 ============
 
-USE_MOCK_DATA = True
+import threading
+
+USE_MOCK_DATA = False  # True=本地假数据，False=真实拉取
 
 
-@st.cache_data(ttl=60)
-def get_all_rates_cached(use_mock_data: bool = False):
-    if use_mock_data:
-        return {"data": funding_core.generate_mock_data(), "ts": time.time()}
+@st.cache_resource
+def start_background_fetcher(use_mock: bool = False):
+    """
+    后台线程：每隔 60s 拉一次数据，写到 data_store 里。
+    UI 只读 data_store，不主动请求交易所。
+    """
+    data_store = {"data": None, "ts": None}
+    lock = threading.Lock()
 
-    # funding_core.fetch_all_raw 是 async，这里包一层
-    async def fetch():
-        return await funding_core.fetch_all_raw()
+    def loop():
+        while True:
+            try:
+                if use_mock:
+                    raw = funding_core.generate_mock_data()
+                else:
+                    async def fetch():
+                        return await funding_core.fetch_all_raw()
+                    raw = asyncio.run(fetch())
 
-    raw_results = asyncio.run(fetch())
-    return {"data": raw_results, "ts": time.time()}
+                ts = time.time()
+                with lock:
+                    data_store["data"] = raw
+                    data_store["ts"] = ts
+
+                logger.info("Background fetch ok, ts=%s", ts)
+            except Exception as e:
+                logger.exception("Background fetch failed: %s", e)
+
+            # 间隔 60 秒再拉
+            time.sleep(60)
+
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+    return data_store, lock
 
 
-res_bundle = get_all_rates_cached(USE_MOCK_DATA)
-raw_results = res_bundle["data"]
-last_update_ts = res_bundle["ts"]
+# 启动后台 fetcher（全局只启动一次）
+data_store, data_lock = start_background_fetcher(USE_MOCK_DATA)
+
+# 在当前这次渲染中读出一个快照
+with data_lock:
+    raw_results = data_store["data"]
+    last_update_ts = data_store["ts"]
+
+if raw_results is None:
+    # 首次还没拉到数据
+    st.markdown(
+        '<div style="font-size:14px; opacity:0.85;">正在拉取数据，请稍后刷新...</div>',
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
 last_update = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_update_ts))
 
 # ============ 设置（齿轮+主题） ============
@@ -69,8 +107,7 @@ with title_col:
 with gear_col:
     selected_exchanges = ui_components.render_settings_popover(default_exchanges)
 
-# 从 session 里读当前主题（render_settings_popover 里已经写入 theme_mode）
-theme_mode = ui_components.render_theme_toggle()
+theme_mode = "dark"
 ui_components.render_global_theme_styles(theme_mode)
 
 # ============ 数据处理 ============
@@ -90,13 +127,9 @@ else:
         ]
         df = df[new_cols]
 
-    # 顶部说明 + 右上角 Last update
-    info_col, time_col = st.columns([4, 1])
-    with info_col:
-        ui_components.render_rate_explanation(theme_mode)
+    ui_components.render_last_update(last_update, theme_mode)
+    ui_components.render_rate_explanation(theme_mode)
 
-    with time_col:
-        ui_components.render_last_update(last_update, theme_mode)
 
     # Merge Rate + Interval
     for ex in default_exchanges:
