@@ -92,23 +92,32 @@ if raw_results is None:
 
 last_update = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_update_ts))
 
-# ============ 设置（齿轮+主题） ============
-default_exchanges = ["Aster", "EdgeX", "Lighter", "HL", "Binance", "Backpack"]
+# ============ 设置 ============
+default_exchanges = funding_core.EXCHANGE_NAMES
 
 # 标题 + 右上角齿轮在同一行
-title_col, gear_col = st.columns([8, 1])
+# title_col, gear_col = st.columns([8, 1])
 
-with title_col:
-    st.markdown(
-        '<div class="page-title">DEXs 资金费率面板</div>',
-        unsafe_allow_html=True,
-    )
+# with title_col:
+#     st.markdown(
+#         '<div class="page-title">DEXs 资金费率面板</div>',
+#         unsafe_allow_html=True,
+#     )
 
-with gear_col:
-    selected_exchanges = ui_components.render_settings_popover(default_exchanges)
+# with gear_col:
+#     selected_exchanges = ui_components.render_settings_popover(default_exchanges)
 
-theme_mode = "dark"
-ui_components.render_global_theme_styles(theme_mode)
+# 去掉齿轮版本
+st.markdown(
+    '<div class="page-title">DEXs 资金费率面板</div>',
+    unsafe_allow_html=True,
+)
+
+# 固定样式（不再支持主题切换）
+ui_components.render_global_theme_styles()
+
+# 不用齿轮了，直接全选所有交易所
+selected_exchanges = default_exchanges
 
 # ============ 数据处理 ============
 
@@ -120,15 +129,15 @@ else:
     df = pd.DataFrame(rows)
 
     # Reorder columns to surface spread near symbol
-    if "APY Spread (%)" in df.columns:
+    if "Max Spread APY (%)" in df.columns:
         cols = df.columns.tolist()
-        new_cols = ["Symbol", "APY Spread (%)"] + [
-            c for c in cols if c not in ("Symbol", "APY Spread (%)")
+        new_cols = ["Symbol", "Max Spread APY (%)"] + [
+            c for c in cols if c not in ("Symbol", "Max Spread APY (%)")
         ]
         df = df[new_cols]
 
-    ui_components.render_last_update(last_update, theme_mode)
-    ui_components.render_rate_explanation(theme_mode)
+    ui_components.render_last_update(last_update)
+    ui_components.render_rate_explanation()
 
 
     # Merge Rate + Interval
@@ -145,9 +154,7 @@ else:
             df.drop(columns=[int_col], inplace=True)
 
     # Render Table（带 sticky header + 主题）
-    ui_components.render_rates_table(
-        df, theme_mode=theme_mode if theme_mode else "auto"
-    )
+    ui_components.render_rates_table(df)
 
 # ============ 页面底部版权 + 访问量 ============
 

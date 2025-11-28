@@ -12,6 +12,16 @@ from exchanges.backpack import Backpack
 
 logger = logging.getLogger("funding_core")
 
+EXCHANGE_FACTORIES: list[tuple[type, str]] = [
+    (Aster, "Aster"),
+    (EdgeX, "EdgeX"),
+    (Lighter, "Lighter"),
+    (Hyperliquid, "HL"),
+    (Binance, "Binance"),
+    (Backpack, "BP"),
+]
+EXCHANGE_NAMES = [name for _, name in EXCHANGE_FACTORIES]
+
 DEFAULT_INTERVAL_HOURS = {
     "Aster": 8,
     "EdgeX": 4,
@@ -87,7 +97,7 @@ def calculate_apy(rate, interval_hours: float = 8):
 
 
 async def fetch_all_raw():
-    exchanges = [(Aster(), "Aster"), (EdgeX(), "EdgeX"), (Lighter(), "Lighter"), (Hyperliquid(), "HL"), (Binance(), "Binance"), (Backpack(), "Backpack")]
+    exchanges = [(factory(), name) for factory, name in EXCHANGE_FACTORIES]
 
     async def fetch_one(exchange_tuple):
         exchange, display_name = exchange_tuple
@@ -107,13 +117,12 @@ async def fetch_all_raw():
 
 def generate_mock_data(rows=200):
     import random
-    exchanges = ["Aster", "EdgeX", "Lighter", "HL", "Binance", "Backpack"]
     mock_results = []
     
     # Generate a list of symbols
     symbols = [f"BTC-USDT-{i}" for i in range(rows)]
     
-    for ex_name in exchanges:
+    for ex_name in EXCHANGE_NAMES:
         rates = []
         for sym in symbols:
             # 10% chance of None
@@ -144,7 +153,7 @@ def generate_mock_data(rows=200):
 
 def process_raw_results(raw_results, selected_exchanges: Optional[Iterable[str]] = None):
     if selected_exchanges is None:
-        selected_exchanges = ["Aster", "EdgeX", "Lighter", "Hyperliquid", "Binance", "Backpack"]
+        selected_exchanges = EXCHANGE_NAMES
     
     data_map: dict[str, dict] = {}
 
@@ -198,7 +207,7 @@ def process_raw_results(raw_results, selected_exchanges: Optional[Iterable[str]]
         if len(apys) < 2:
             continue
             
-        row["APY Spread (%)"] = max(apys) - min(apys)
+        row["Max Spread APY (%)"] = max(apys) - min(apys)
         rows.append(row)
 
     return rows

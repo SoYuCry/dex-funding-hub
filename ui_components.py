@@ -10,10 +10,14 @@ import streamlit as st
 
 logger = logging.getLogger("funding_monitor")
 
-THEME_LABELS = {
-    "auto": "跟随系统",
-    "light": "明亮",
-    "dark": "暗色",
+PALETTE = {
+    "wrapper_bg": "#0b0f19",
+    "table_bg": "#0b0f19",
+    "text": "#e9edf5",
+    "border": "#303645",
+    "row_border": "#333",
+    "hover": "#141a25",
+    "head_shadow": "#0b0f19",
 }
 
 SOCIAL_HTML = """
@@ -51,39 +55,13 @@ SOCIAL_HTML = """
 
 VISIT_LOG_PATH = Path("visit_log.jsonl")
 
-def _get_palette(theme_mode: str):
-    palette_dark = {
-        "wrapper_bg": "#0b0f19",
-        "table_bg": "#0b0f19",
-        "text": "#e9edf5",
-        "border": "#303645",
-        "row_border": "#333",
-        "hover": "#141a25",
-        "head_shadow": "#0b0f19",
-    }
-    palette_light = {
-        "wrapper_bg": "#f8f9fb",
-        "table_bg": "#ffffff",
-        "text": "#0b0f19",
-        "border": "#d7dbe3",
-        "row_border": "#e6e8ef",
-        "hover": "#eef1f5",
-        "head_shadow": "#f8f9fb",
-    }
-    if theme_mode == "light":
-        return palette_light
-    if theme_mode == "dark":
-        return palette_dark
-    # auto: follow streamlit base (default dark palette here)
-    return palette_dark
-
 
 def render_social_links():
     st.markdown(SOCIAL_HTML, unsafe_allow_html=True)
 
 
-def render_global_theme_styles(theme_mode: str):
-    palette = _get_palette(theme_mode)
+def render_global_theme_styles():
+    palette = PALETTE
     st.markdown(
         f"""
         <style>
@@ -185,7 +163,7 @@ def render_settings_popover(default_exchanges):
     设置齿轮：只包含 交易所选择（已移除主题切换）
     """
     # 固定用暗色调来渲染齿轮按钮外观
-    palette = _get_palette("dark")
+    palette = PALETTE
 
     st.markdown(
         f"""
@@ -259,8 +237,8 @@ def render_settings_popover(default_exchanges):
     return current_selection
 
 
-def render_rate_explanation(theme_mode: str = "auto"):
-    palette = _get_palette(theme_mode)
+def render_rate_explanation():
+    palette = PALETTE
     st.markdown(
         f"""
         <div style="
@@ -272,14 +250,14 @@ def render_rate_explanation(theme_mode: str = "auto"):
         ">
           说明：资金费率按小时拆分，用对应交易所/符号的结算周期计算年化：
           <code>rate × (24 / 周期) × 365 × 100</code>；
-          SPREAD 基于年化 APY：<code>(最高 APY - 最低 APY)</code>。
+          Max Spread 基于年化 APY：<code>(最高 APY - 最低 APY)</code>。
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-def render_last_update(ts: str, theme_mode: str = "auto"):
-    palette = _get_palette(theme_mode)
+def render_last_update(ts: str):
+    palette = PALETTE
     st.markdown(
         f"""
         <div style="
@@ -325,19 +303,21 @@ def _highlight_extremes(row, spread_cols):
     return styles
 
 
-def render_rates_table(df, theme_mode: str = "auto"):
+def render_rates_table(df):
     # Styling Logic
+    palette = PALETTE
     fmt_dict = {}
+    def _fmt_pct(x):
+        return "-" if pd.isna(x) else "{:.2f}%".format(x)
+
     apy_cols_in_df = [
-        c for c in df.columns if c.endswith("APY%") and c != "APY Spread (%)"
+        c for c in df.columns if c.endswith("APY%") and c != "Max Spread APY (%)"
     ]
     for col in apy_cols_in_df:
-        fmt_dict[col] = (lambda x: "{:.2f}%".format(x) if x is not None else "-")
+        fmt_dict[col] = _fmt_pct
 
-    if "APY Spread (%)" in df.columns:
-        fmt_dict["APY Spread (%)"] = (
-            lambda x: "{:.2f}%".format(x) if x is not None else "-"
-        )
+    if "Max Spread APY (%)" in df.columns:
+        fmt_dict["Max Spread APY (%)"] = _fmt_pct
 
     styler = df.style.format(fmt_dict)
 
@@ -345,20 +325,23 @@ def render_rates_table(df, theme_mode: str = "auto"):
     spread_cols = apy_cols_in_df.copy()
     if spread_cols:
         styler = styler.background_gradient(
-            subset=spread_cols, cmap="RdYlGn", vmin=-50, vmax=50
+            subset=spread_cols,
+            cmap="RdYlGn",
+            vmin=-50,
+            vmax=50,
         )
-    if "APY Spread (%)" in df.columns:
+    if "Max Spread APY (%)" in df.columns:
         spread_vmin, spread_vmax = 0, 100
         try:
-            if not df["APY Spread (%)"].empty:
-                spread_vmin = max(0, df["APY Spread (%)"].quantile(0.05))
-                spread_vmax = df["APY Spread (%)"].quantile(0.95)
+            if not df["Max Spread APY (%)"].empty:
+                spread_vmin = max(0, df["Max Spread APY (%)"].quantile(0.05))
+                spread_vmax = df["Max Spread APY (%)"].quantile(0.95)
                 if spread_vmax <= spread_vmin:
                     spread_vmax = spread_vmin + 1
         except Exception:
             pass
         styler = styler.background_gradient(
-            subset=["APY Spread (%)"],
+            subset=["Max Spread APY (%)"],
             cmap="Oranges",
             vmin=spread_vmin,
             vmax=spread_vmax,
@@ -368,6 +351,18 @@ def render_rates_table(df, theme_mode: str = "auto"):
         styler = styler.apply(
             _highlight_extremes, spread_cols=spread_cols, subset=spread_cols, axis=1
         )
+
+    def _na_bg(series):
+        return [
+            f"background-color: {palette['table_bg']}; color: {palette['text']};"
+            if pd.isna(v) else ""
+            for v in series
+        ]
+
+    if spread_cols:
+        styler = styler.apply(_na_bg, subset=spread_cols)
+    if "Max Spread APY (%)" in df.columns:
+        styler = styler.apply(_na_bg, subset=["Max Spread APY (%)"])
 
     # HTML Rendering
     html = styler.to_html()
@@ -380,13 +375,22 @@ def render_rates_table(df, theme_mode: str = "auto"):
     # Inject table ID into the HTML
     html_with_id = html.replace("<table", f'<table id="{table_id}"', 1)
 
-        # theme palette
-    palette = _get_palette(theme_mode)
-    top_offset = "2.5rem"
+    palette = PALETTE
+    top_offset = "3rem"
 
     css_block = textwrap.dedent(
         f"""
         <style>
+        /* 整个表格基础样式，去掉默认间距，避免“列间透光” */
+        .custom-table-container table {{
+            width: 100%;
+            border-collapse: collapse;
+            border-spacing: 0;
+            background-color: {palette["table_bg"]};
+            color: {palette["text"]};
+            font-size: 14px;
+        }}
+
         .custom-table-container thead {{
             position: sticky;
             top: {top_offset};  /* align with Streamlit top padding/header */
@@ -396,17 +400,23 @@ def render_rates_table(df, theme_mode: str = "auto"):
 
         /* 表头单元格的基础样式 */
         .custom-table-container thead th {{
-            position: sticky;
-            top: {top_offset};
+            /* 不再在 th 上做 sticky，只让 thead sticky 就够了 */
             background-color: {palette["table_bg"]};
             z-index: 999;
             padding: 8px;
-            text-align: right;
+            text-align: center;
             border-bottom: 2px solid {palette["border"]};
+            border-right: 1px solid {palette["border"]};
             box-shadow: 0 2px 6px rgba(0,0,0,0.45);
             cursor: pointer;
             user-select: none;
             color: {palette["text"]};
+            white-space: nowrap;
+        }}
+
+        /* 最后一列表头不需要右边框，避免双线 */
+        .custom-table-container thead th:last-child {{
+            border-right: none;
         }}
 
         /* 默认的上下箭头提示 */
@@ -430,12 +440,19 @@ def render_rates_table(df, theme_mode: str = "auto"):
             opacity: 1;
         }}
 
-        /* 表体单元格稍微补一下，保证颜色一致 */
+        /* 表体单元格样式 */
         .custom-table-container tbody td {{
             padding: 8px;
-            text-align: right;
+            text-align: center;
             border-bottom: 1px solid {palette["row_border"]};
+            /* 同样加右边框，和表头对齐，不透光 */
+            border-right: 1px solid {palette["row_border"]};
             color: {palette["text"]};
+            white-space: nowrap;
+        }}
+
+        .custom-table-container tbody td:last-child {{
+            border-right: none;
         }}
 
         .custom-table-container tbody tr:hover {{
@@ -444,6 +461,7 @@ def render_rates_table(df, theme_mode: str = "auto"):
         </style>
         """
     )
+
 
 
 
