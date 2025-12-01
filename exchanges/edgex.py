@@ -42,6 +42,10 @@ class EdgeX(Exchange):
                  raise Exception(f"EdgeX API error (contracts): {data}")
 
             for contract in data['data']['contractList']:
+                # Skip hidden contracts
+                if contract.get("enableDisplay") is False:
+                    continue
+                    
                 if contract['contractName'] == symbol:
                     self.contract_map[symbol] = contract['contractId']
                     interval_min = contract.get("fundingRateIntervalMin")
@@ -173,6 +177,28 @@ class EdgeX(Exchange):
             return [r for r in fetched_results if r is not None]
 
     async def _fetch_all_funding_ws(self) -> list[dict]:
+        # 1. Fetch metadata to filter hidden contracts
+        valid_symbols = set()
+        async with aiohttp.ClientSession(headers=self.headers, timeout=self.timeout, cookies=self.cookies) as session:
+            url_meta = f"{self.base_url}/api/v1/public/meta/getMetaData"
+            try:
+                async with session.get(url_meta) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get('code') == 'SUCCESS':
+                            for contract in data['data']['contractList']:
+                                if contract.get("enableDisplay") is False:
+                                    continue
+                                valid_symbols.add(contract['contractName'])
+                                # Also add USDT variant if needed
+                                if contract['contractName'].endswith("USD"):
+                                    valid_symbols.add(contract['contractName'] + "T")
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch metadata for filtering: {e}")
+                # If metadata fetch fails, we might want to fall back to HTTP or proceed without filtering
+                # For now, let's proceed but log warning. If valid_symbols is empty, we won't filter.
+                pass
+
         uri = "wss://quote.edgex.exchange/api/v1/public/ws"
         sub_msg = {"type": "subscribe", "channel": "ticker.all.1s"}
         async with websockets.connect(
@@ -206,6 +232,16 @@ class EdgeX(Exchange):
                         continue
                     if str(name).startswith("TEMP"):
                         continue
+                    
+                    # Filter hidden contracts if we successfully fetched metadata
+                    if valid_symbols and name not in valid_symbols:
+                        # Try normalized name
+                        symbol = name
+                        if symbol.endswith("USD") and not symbol.endswith("USDT"):
+                            symbol += "T"
+                        if symbol not in valid_symbols:
+                            continue
+
                     fr = item.get("fundingRate")
                     if fr is None:
                         continue
