@@ -98,11 +98,11 @@ class Aster(Exchange):
         try:
             async with session.get(url, params=params) as resp:
                 if resp.status != 200:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 data = await resp.json()
                 if not isinstance(data, list) or len(data) == 0:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 # 提取 fundingTime（毫秒时间戳），并统一按时间降序（最新在前）
                 funding_times = []
@@ -113,7 +113,7 @@ class Aster(Exchange):
                 funding_times.sort(reverse=True)
 
                 if not funding_times:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 # 优先用 nextFundingTime 与最近一次 fundingTime 的差
                 if nextFundingTime is not None:

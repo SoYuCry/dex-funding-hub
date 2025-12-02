@@ -58,10 +58,16 @@ SOCIAL_HTML = """
 <div class="social-container">
   <div class="social-row">
     <a class="x-link" href="https://x.com/0xYuCry" target="_blank" rel="noopener noreferrer">
-      <span>𝕏</span> @0xYuCry
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="#cbd5e1" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 4H9L13 10.1L17.2 4H20L14.3 11.7L20 20H17L12.7 13.6L8.1 20H4L10 12L6 4Z"/>
+        </svg>
+        @0xYuCry
     </a>
-    <a class="tg-link" href="https://t.me/+gBbEJUXAKn81NGJl" target="_blank" rel="noopener noreferrer">
-      <span>✈</span> Telegram
+    <a class="tg-link" href="https://t.me/Nova_Crpytohub" target="_blank" rel="noopener noreferrer">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="#cbd5e1" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9.8 15.9L9.6 19.8C9.9 19.8 10.0 19.7 10.2 19.5L12.1 17.7L16.1 20.6C16.8 21.0 17.3 20.8 17.5 19.9L20.4 5.7C20.7 4.6 19.9 4.1 19.2 4.4L3.4 10.5C2.3 10.9 2.3 11.5 3.1 11.7L7.1 12.9L16.6 7.0C17.1 6.7 17.5 6.9 17.1 7.2L9.8 15.9Z"/>
+        </svg>
+        Telegram
     </a>
   </div>
 </div>
@@ -159,7 +165,6 @@ def get_visit_count() -> int | None:
         logger.error("Visit log read failed: %s", e)
         return None
 
-
 def render_visit_counter():
     """底部版权 + 访问量"""
     record_visit_once()
@@ -174,6 +179,20 @@ def render_visit_counter():
             """,
             unsafe_allow_html=True,
         )
+    st.markdown(
+        f"""
+        <div style="margin-top:6px; text-align:center;">
+        <a href="https://github.com/SoYuCry/Nova_funding_hub" target="_blank" style="color:#cbd5e1; text-decoration:none; font-size:12px; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#cbd5e1" xmlns="http://www.w3.org/2000/svg">
+            <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.55 7.55 0 0 1 8 3.87c.68.003 1.37.092 2.01.27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+            <span>GitHub · Nova Funding Hub</span>
+        </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_settings_popover(default_exchanges):
     """
     设置齿轮：只包含 交易所选择（已移除主题切换）

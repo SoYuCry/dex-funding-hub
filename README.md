@@ -47,11 +47,11 @@
 *   `exchanges/`: 各交易所接口实现。
 
 
-## 🚀 关于 Nova 社区
+## 🚀 关于 Nova
 
 Nova 是一个专注于 **加密货币套利 (Arbitrage)** 与 **量化交易** 的新兴社区。我们致力于分享高质量的套利策略、开发实用的交易工具，并连接志同道合的交易者。
 
 🤝 **加入我们：**
 
 *   **X (Twitter)**: [@0xYuCry](https://x.com/0xYuCry)
-*   **Telegram**: [Nova Community](https://t.me/+gBbEJUXAKn81NGJl)
+*   **Telegram**: [Nova Community](https://t.me/Nova_Crpytohub)

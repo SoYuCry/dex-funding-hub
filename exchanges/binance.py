@@ -115,11 +115,6 @@ class Binance(Exchange):
         优先使用 nextFundingTime 与最近一次 fundingTime 的差值，
         否则 fallback 到最近两次 fundingTime 的差值。
         """
-        # 先查缓存
-        cached = self._get_cached_interval(symbol)
-        if cached is not None:
-            return cached
-
         norm_symbol = self._normalize_symbol(symbol)
         url = f"{self.base_url}/fapi/v1/fundingRate"
         params = {"symbol": norm_symbol, "limit": 2}
@@ -127,15 +122,15 @@ class Binance(Exchange):
         try:
             async with session.get(url, params=params) as resp:
                 if resp.status != 200:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 data = await resp.json()
                 if not isinstance(data, list) or len(data) == 0:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 funding_times = self._extract_funding_times(data)
                 if not funding_times:
-                    return None
+                    return self._get_cached_interval(norm_symbol)
 
                 hrs: float | None = None
 
@@ -158,7 +153,7 @@ class Binance(Exchange):
                 return hrs
 
         except Exception:
-            return None
+            return self._get_cached_interval(norm_symbol)
 
     # =============================
     # 对外接口
